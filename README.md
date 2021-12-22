@@ -11,4 +11,4 @@ Provide a simple interface for linux programs/scripts to use (create/read/write/
 - delete_dir
 - create_var
 - delete_var
-- free all the allocated on module removal
+- free all the allocated space on module removal
