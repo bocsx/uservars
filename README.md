@@ -15,3 +15,4 @@ Provide a simple interface for linux programs/scripts to use (create/read/write/
 - use variable size variables instead of a fix one
 - use a tree instead of the linked list
 - free all the allocated space on module removal
+- review error handling (right error messages back to the user)
