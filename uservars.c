@@ -22,17 +22,8 @@
 // Please include this from your kernel source as they moved proc_dir_entry from proc_fs.h to here :(
 #include "/usr/src/linux-source-4.15.0/fs/proc/internal.h"
 
-
-#define MSG_SIZE (512)
 #define VAR_NAME_SIZE (512)
 #define VAR_VALUE_SIZE (512)
-
-struct message {
-	char text[MSG_SIZE];
-	struct list_head list;
-};
-
-LIST_HEAD(message_list);
 
 struct var {
 	unsigned long inode;
@@ -148,15 +139,6 @@ ssize_t uv_proc_write(struct file *filp,const char *buf,size_t count,loff_t *off
 
 	//printk(KERN_WARNING "filp->f_inode->i_ino: %lu", filp->f_inode->i_ino);
 
-	//list_for_each_entry(variable, &var_list, list) {
-	//	//printk(KERN_WARNING "variable->inode: %lu\tfilp->f_inode->i_ino: %lu", variable->inode, filp->f_inode->i_ino);
-	//	if (variable->inode == filp->f_inode->i_ino) {
-	//		copy_from_user(variable->value, buf, actual_len);
-	//		variable->value[actual_len]='\0';
-	//		return count;
-	//	}
-	//}
-
 	variable=find_by_inode(filp->f_inode->i_ino);
 	if (variable) {
 		copy_from_user(variable->value, buf, actual_len);
@@ -169,17 +151,7 @@ ssize_t uv_proc_write(struct file *filp,const char *buf,size_t count,loff_t *off
 
 static int uv_proc_show(struct seq_file *m, void *v)
 {
-	//seq_printf(m, msg);
-
 	struct var *variable;
-
-	//list_for_each_entry(variable, &var_list, list) {
-	//	//printk(KERN_WARNING "variable->inode: %lu\tm->file->f_inode->i_ino: %lu", variable->inode, m->file->f_inode->i_ino);
-	//	if (variable->inode == m->file->f_inode->i_ino) {
-	//		seq_printf(m, variable->value);
-	//		return 0;
-	//	}
-	//}
 
 	variable=find_by_inode(m->file->f_inode->i_ino);
 	if (variable) {
@@ -274,8 +246,6 @@ ssize_t uv_create_var_write(struct file *filp,const char *buf,size_t count,loff_
 
 static int uv_list_var_show(struct seq_file *m, void *v)
 {
-	//seq_printf(m, msg);
-
 	struct var *variable;
 
 	list_for_each_entry( variable, &var_list, list ) {
@@ -346,7 +316,6 @@ void proc_cleanup(void)
 	remove_proc_entry("delete_var", system_dir);
 	proc_remove(system_dir);
 	proc_remove(uservars_dir);
-	//kfree(msg);
 }
 
 
