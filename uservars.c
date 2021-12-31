@@ -35,10 +35,13 @@ struct var {
 
 LIST_HEAD(var_list);
 
-struct proc_dir_entry *uservars_dir;
-struct proc_dir_entry *system_dir;
-struct proc_dir_entry *createdir_file;
-
+struct proc_dir_entry *uservars_pde;
+struct proc_dir_entry *system_pde;
+struct proc_dir_entry *createdir_pde;
+struct proc_dir_entry *deletedir_pde;
+struct proc_dir_entry *createvar_pde;
+struct proc_dir_entry *deletevar_pde;
+struct proc_dir_entry *listvar_pde;
 
 #define ourmin(a,b) (((a)<(b)) ? (a) : (b))
 
@@ -198,7 +201,62 @@ ssize_t uv_create_var_entry(struct file *filp,const char *buf,size_t count, int 
 	dir_name(dname, actual_len);
 	printk(KERN_WARNING "variable->name: >>%s<< bname: >>%s<<, dname: >>%s<<",variable->name, bname, dname);
 	if (!strcmp(dname, ""))
-		parent_dir=uservars_dir;
+		parent_dir=uservars_pde;
+	else {
+		parent=find_by_name(dname);
+		if (!parent) {
+			printk(KERN_WARNING "No parent directory %s", dname);
+			kfree( variable );
+			return -ENOMEM;
+		}
+		parent_dir=parent->pde;
+	}
+
+	if (is_dir) {
+		variable->pde = proc_mkdir(bname, parent_dir);
+		if(!variable->pde) {
+			printk(KERN_WARNING "Error creating proc entry %s", variable->name);
+			kfree( variable );
+			return -ENOMEM;
+		}
+	} else {
+		variable->pde=proc_create(bname, 0666, parent_dir, &proc_fops);
+		if(!variable->pde) {
+			printk(KERN_WARNING "Error creating proc entry %s", variable->name);
+			kfree( variable );
+			return -ENOMEM;
+		}
+	}
+
+	variable->value[0] = '\0';
+	variable->inode=variable->pde->low_ino;
+
+	INIT_LIST_HEAD(&variable->list);
+	list_add_tail( &variable->list, &var_list );
+
+	return count;
+}
+
+ssize_t uv_delete_var_entry(struct file *filp,const char *buf,size_t count, loff_t *offp)
+{
+	struct var *variable, *parent;
+	struct proc_dir_entry *parent_dir;
+	unsigned long actual_len = ourmin(count, VAR_NAME_SIZE-1);
+	char *bname;
+	char dname[ VAR_NAME_SIZE ];
+
+	variable = kmalloc(sizeof(struct var), GFP_KERNEL);
+	
+	copy_from_user(variable->name, buf, actual_len);
+	variable->name[actual_len]='\0';
+	actual_len=strip_name(variable->name, actual_len);
+	bname=base_name(variable->name, actual_len);
+
+	strcpy(dname, variable->name);
+	dir_name(dname, actual_len);
+	printk(KERN_WARNING "variable->name: >>%s<< bname: >>%s<<, dname: >>%s<<",variable->name, bname, dname);
+	if (!strcmp(dname, ""))
+		parent_dir=uservars_pde;
 	else {
 		parent=find_by_name(dname);
 		if (!parent) {
@@ -266,9 +324,19 @@ static const struct file_operations create_dir_fops = {
 	.write = uv_create_dir_write,
 };
 
+static const struct file_operations delete_dir_fops = {
+	.owner = THIS_MODULE,
+	.write = uv_delete_var_entry,
+};
+
 static const struct file_operations create_var_fops = {
 	.owner = THIS_MODULE,
 	.write = uv_create_var_write,
+};
+
+static const struct file_operations delete_var_fops = {
+	.owner = THIS_MODULE,
+	.write = uv_delete_var_entry,
 };
 
 static const struct file_operations list_var_fops = {
@@ -281,41 +349,71 @@ static const struct file_operations list_var_fops = {
 
 int proc_init (void)
 {
+	char *name;
 
-	uservars_dir = proc_mkdir("uservars", NULL);
-	if(!uservars_dir) {
-		printk(KERN_INFO "Error creating proc entry");
+	name="uservars";
+	uservars_pde=proc_mkdir(name, NULL);
+	if(!uservars_pde) {
+		printk(KERN_WARNING "Error creating proc entry %s", name);
 		return -ENOMEM;
 	}
-	print_proc_dir_entry(uservars_dir);
-	system_dir = proc_mkdir("system", uservars_dir);
-	if(!system_dir) {
-		printk(KERN_INFO "Error creating proc entry");
+	name="system";
+	system_pde=proc_mkdir(name, uservars_pde);
+	if(!system_pde) {
+		printk(KERN_WARNING "Error creating proc entry %s", name);
 		return -ENOMEM;
 	}
-	print_proc_dir_entry(system_dir);
-
-	// Should check the output of this too
-	createdir_file = proc_create("create_dir", 0644, system_dir, &create_dir_fops);
-	printk(KERN_WARNING "proc_init - low_ino: %u", createdir_file->low_ino);
-	print_proc_dir_entry(createdir_file);
-	proc_create("delete_dir", 0644, system_dir, &proc_fops);
-	proc_create("create_var", 0644, system_dir, &create_var_fops);
-	proc_create("delete_var", 0644, system_dir, &proc_fops);
-	proc_create("list_var", 0644, system_dir, &list_var_fops);
-
+	name="create_dir";
+	createdir_pde=proc_create(name, 0666, system_pde, &create_dir_fops);
+	if(!createdir_pde) {
+		printk(KERN_WARNING "Error creating proc entry %s", name);
+		return -ENOMEM;
+	}
+	name="delete_dir";
+	deletedir_pde=proc_create(name, 0666, system_pde, &proc_fops);
+	if(!deletedir_pde) {
+		printk(KERN_WARNING "Error creating proc entry %s", name);
+		return -ENOMEM;
+	}
+	name="create_var";
+	createvar_pde=proc_create(name, 0666, system_pde, &create_var_fops);
+	if(!createvar_pde) {
+		printk(KERN_WARNING "Error creating proc entry %s", name);
+		return -ENOMEM;
+	}
+	name="delete_var";
+	deletevar_pde=proc_create(name, 0666, system_pde, &proc_fops);
+	if(!deletevar_pde) {
+		printk(KERN_WARNING "Error creating proc entry %s", name);
+		return -ENOMEM;
+	}
+	name="list_var";
+	listvar_pde=proc_create(name, 0666, system_pde, &list_var_fops);
+	if(!listvar_pde) {
+		printk(KERN_WARNING "Error creating proc entry %s", name);
+		return -ENOMEM;
+	}
+	//printk(KERN_WARNING "proc_init - low_ino: %u", createdir_pde->low_ino);
+	//print_proc_dir_entry(createdir_pde);
+	
 	return 0;
 }
 
 void proc_cleanup(void)
 {
-
-	remove_proc_entry("create_dir", system_dir);
-	remove_proc_entry("delete_dir", system_dir);
-	remove_proc_entry("create_var", system_dir);
-	remove_proc_entry("delete_var", system_dir);
-	proc_remove(system_dir);
-	proc_remove(uservars_dir);
+/*
+	remove_proc_entry("create_dir", system_pde);
+	remove_proc_entry("delete_dir", system_pde);
+	remove_proc_entry("create_var", system_pde);
+	remove_proc_entry("delete_var", system_pde);
+*/
+	proc_remove(createdir_pde);
+	proc_remove(deletedir_pde);
+	proc_remove(createvar_pde);
+	proc_remove(deletevar_pde);
+	proc_remove(listvar_pde);
+	proc_remove(system_pde);
+	proc_remove(uservars_pde);
 }
 
 
