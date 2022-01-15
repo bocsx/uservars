@@ -34,6 +34,7 @@ struct var {
 };
 
 LIST_HEAD(var_list);
+DEFINE_MUTEX(var_mutex);
 
 struct proc_dir_entry *uservars_pde;
 struct proc_dir_entry *command_pde;
@@ -44,7 +45,7 @@ struct proc_dir_entry *list_pde;
 
 #define ourmin(a,b) (((a)<(b)) ? (a) : (b))
 
-void print_proc_dir_entry(struct proc_dir_entry *pde)
+void uv_print_proc_dir_entry(struct proc_dir_entry *pde)
 {
 
 	printk(KERN_WARNING "pde->low_ino: %u", pde->low_ino);
@@ -53,12 +54,12 @@ void print_proc_dir_entry(struct proc_dir_entry *pde)
 
 }
 
-void print_var(struct var *v)
-{
-	printk(KERN_WARNING "inode: %lu\tname: %s\tvalue: %s", v->inode, v->name, v->value);
-}
+//void print_var(struct var *v)
+//{
+//	printk(KERN_WARNING "inode: %lu\tname: %s\tvalue: %s", v->inode, v->name, v->value);
+//}
 
-unsigned long strip_name(char *name, unsigned long len)
+unsigned long uv_strip_name(char *name, unsigned long len)
 {
 	char *c;
 
@@ -81,7 +82,7 @@ unsigned long strip_name(char *name, unsigned long len)
 	return len;
 }
 
-char *base_name( char *name, unsigned long len)
+char *uv_base_name( char *name, unsigned long len)
 {
 	char *c;
 	c=name + len - 1;
@@ -91,7 +92,7 @@ char *base_name( char *name, unsigned long len)
 	return ++c;
 }
 
-void dir_name( char *name, unsigned long len)
+void uv_dir_name( char *name, unsigned long len)
 {
 	char *c;
 /*
@@ -109,27 +110,35 @@ void dir_name( char *name, unsigned long len)
 		*c='\0';
 }
 
-struct var *find_by_inode(unsigned long inode)
+struct var *uv_find_by_inode(unsigned long inode)
 {
 	struct var *v;
 
+	mutex_lock(&var_mutex);
 	list_for_each_entry(v, &var_list, list) {
 		if (v->inode == inode) {
+			mutex_unlock(&var_mutex);
 			return v;
 		}
 	}
+	mutex_unlock(&var_mutex);
+
 	return NULL;
 }
 
-struct var *find_by_name(char *name)
+struct var *uv_find_by_name(char *name)
 {
 	struct var *v;
 
+	mutex_lock(&var_mutex);
 	list_for_each_entry(v, &var_list, list) {
 		if (!strcmp(v->name, name)) {
+			mutex_unlock(&var_mutex);
 			return v;
 		}
 	}
+	mutex_unlock(&var_mutex);
+
 	return NULL;
 }
 
@@ -141,10 +150,12 @@ ssize_t uv_proc_write(struct file *filp,const char *buf,size_t count,loff_t *off
 
 	//printk(KERN_WARNING "filp->f_inode->i_ino: %lu", filp->f_inode->i_ino);
 
-	variable=find_by_inode(filp->f_inode->i_ino);
+	variable=uv_find_by_inode(filp->f_inode->i_ino);
 	if (variable) {
+		mutex_lock(&var_mutex);
 		copy_from_user(variable->value, buf, actual_len);
 		variable->value[actual_len]='\0';
+		mutex_unlock(&var_mutex);
 	}
 
 	return count;
@@ -155,9 +166,11 @@ static int uv_proc_show(struct seq_file *m, void *v)
 {
 	struct var *variable;
 
-	variable=find_by_inode(m->file->f_inode->i_ino);
+	variable=uv_find_by_inode(m->file->f_inode->i_ino);
 	if (variable) {
+		mutex_lock(&var_mutex);
 		seq_printf(m, variable->value);
+		mutex_unlock(&var_mutex);
 		return 0;
 	}
 
@@ -193,16 +206,16 @@ ssize_t uv_create_var_entry(struct file *filp,const char *buf,size_t count, int 
 	
 	copy_from_user(variable->name, buf, actual_len);
 	variable->name[actual_len]='\0';
-	actual_len=strip_name(variable->name, actual_len);
-	bname=base_name(variable->name, actual_len);
+	actual_len=uv_strip_name(variable->name, actual_len);
+	bname=uv_base_name(variable->name, actual_len);
 
 	strcpy(dname, variable->name);
-	dir_name(dname, actual_len);
+	uv_dir_name(dname, actual_len);
 	printk(KERN_WARNING "uv_create_var_entry - variable->name: >>%s<< bname: >>%s<<, dname: >>%s<<",variable->name, bname, dname);
 	if (!strcmp(dname, ""))
 		parent_dir=uservars_pde;
 	else {
-		parent=find_by_name(dname);
+		parent=uv_find_by_name(dname);
 		if (!parent) {
 			printk(KERN_WARNING "No parent directory %s", dname);
 			kfree( variable );
@@ -231,7 +244,9 @@ ssize_t uv_create_var_entry(struct file *filp,const char *buf,size_t count, int 
 	variable->inode=variable->pde->low_ino;
 
 	INIT_LIST_HEAD(&variable->list);
+	mutex_lock(&var_mutex);
 	list_add_tail( &variable->list, &var_list );
+	mutex_unlock(&var_mutex);
 
 	return count;
 }
@@ -244,9 +259,9 @@ ssize_t uv_delete_write(struct file *filp,const char *buf,size_t count, loff_t *
 
 	copy_from_user(name, buf, actual_len);
 	name[actual_len]='\0';
-	actual_len=strip_name(name, actual_len);
+	actual_len=uv_strip_name(name, actual_len);
 
-	variable=find_by_name(name);
+	variable=uv_find_by_name(name);
 	if (!variable) {
 		printk(KERN_WARNING "%s doesn't exist, cannot delete", name);
 		return -ENOMEM;
@@ -255,7 +270,9 @@ ssize_t uv_delete_write(struct file *filp,const char *buf,size_t count, loff_t *
 	printk(KERN_WARNING "uv_delete_write - name: >>%s<< variable->name: >>%s<<, variable->inode: >>%lu<<", name, variable->name, variable->inode);
 
 	proc_remove(variable->pde);
+	mutex_lock(&var_mutex);
 	list_del(&variable->list);
+	mutex_unlock(&var_mutex);
 	kfree( variable );
 
 	return count;
@@ -275,10 +292,12 @@ static int uv_list_show(struct seq_file *m, void *v)
 {
 	struct var *variable;
 
+	mutex_lock(&var_mutex);
 	list_for_each_entry( variable, &var_list, list ) {
 		seq_printf(m, "%lu %s: %s\n", variable->inode, variable->name, variable->value);
-		// print_proc_dir_entry( variable->pde );
+		// uv_print_proc_dir_entry( variable->pde );
 	}
+	mutex_unlock(&var_mutex);
 
 	return 0;
 }
@@ -314,6 +333,8 @@ static const struct file_operations list_fops = {
 int proc_init (void)
 {
 	char *name;
+
+	mutex_init(&var_mutex);
 
 	name="uservars";
 	uservars_pde=proc_mkdir(name, NULL);
@@ -352,7 +373,7 @@ int proc_init (void)
 		return -ENOMEM;
 	}
 	//printk(KERN_WARNING "proc_init - low_ino: %u", createdir_pde->low_ino);
-	//print_proc_dir_entry(createdir_pde);
+	//uv_print_proc_dir_entry(createdir_pde);
 	
 	return 0;
 }
