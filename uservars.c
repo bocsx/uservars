@@ -380,6 +380,17 @@ int proc_init (void)
 
 void proc_cleanup(void)
 {
+	struct var *v, *next;
+
+	mutex_lock(&var_mutex);
+	list_for_each_entry_safe_reverse(v, next, &var_list, list) {
+		proc_remove(v->pde);
+		list_del(&v->list);
+		kfree( v );
+
+	}
+	mutex_unlock(&var_mutex);
+
 	proc_remove(createdir_pde);
 	proc_remove(createvar_pde);
 	proc_remove(delete_pde);
