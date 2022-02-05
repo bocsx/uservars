@@ -1,5 +1,5 @@
 # uservars
-Provide a simple interface for linux programs/scripts to use (create/read/write/delete) /proc kernel variables.
+Kernel module that provides a simple interface for linux programs/scripts to use (create/read/write/delete) /proc kernel variables.
 ## Usage
 ### Managing directories and variables:
 - Create directory under /proc/uservars: echo -n directory_path >/proc/uservars/command/create_dir

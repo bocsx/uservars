@@ -28,7 +28,7 @@
 struct var {
 	unsigned long inode;
 	char name[VAR_NAME_SIZE];
-	char value[VAR_VALUE_SIZE];
+	char *value;
 	struct proc_dir_entry *pde;
 	struct list_head list;
 };
@@ -146,15 +146,16 @@ ssize_t uv_proc_write(struct file *filp,const char *buf,size_t count,loff_t *off
 {
 	struct var *variable;
 
-	unsigned long actual_len = ourmin(count, VAR_VALUE_SIZE-1);
-
 	//printk(KERN_WARNING "filp->f_inode->i_ino: %lu", filp->f_inode->i_ino);
 
 	variable=uv_find_by_inode(filp->f_inode->i_ino);
 	if (variable) {
 		mutex_lock(&var_mutex);
-		copy_from_user(variable->value, buf, actual_len);
-		variable->value[actual_len]='\0';
+		if(variable->value != NULL)
+			kfree(variable->value);
+		variable->value = kmalloc(count+1, GFP_KERNEL);
+		copy_from_user(variable->value, buf, count);
+		variable->value[count]='\0';
 		mutex_unlock(&var_mutex);
 	}
 
@@ -240,7 +241,7 @@ ssize_t uv_create_var_entry(struct file *filp,const char *buf,size_t count, int 
 		}
 	}
 
-	variable->value[0] = '\0';
+	variable->value = NULL;
 	variable->inode=variable->pde->low_ino;
 
 	INIT_LIST_HEAD(&variable->list);
@@ -273,6 +274,8 @@ ssize_t uv_delete_write(struct file *filp,const char *buf,size_t count, loff_t *
 	mutex_lock(&var_mutex);
 	list_del(&variable->list);
 	mutex_unlock(&var_mutex);
+	if(variable->value != NULL)
+		kfree( variable->value );
 	kfree( variable );
 
 	return count;
@@ -294,7 +297,10 @@ static int uv_list_show(struct seq_file *m, void *v)
 
 	mutex_lock(&var_mutex);
 	list_for_each_entry( variable, &var_list, list ) {
-		seq_printf(m, "%lu %s: %s\n", variable->inode, variable->name, variable->value);
+		if(variable->value != NULL)
+			seq_printf(m, "%lu %s(%li): %s\n", variable->inode, variable->name, strlen(variable->value), variable->value);
+		else
+			seq_printf(m, "%lu %s:\n", variable->inode, variable->name);
 		// uv_print_proc_dir_entry( variable->pde );
 	}
 	mutex_unlock(&var_mutex);
@@ -386,6 +392,8 @@ void proc_cleanup(void)
 	list_for_each_entry_safe_reverse(v, next, &var_list, list) {
 		proc_remove(v->pde);
 		list_del(&v->list);
+		if(v->value != NULL)
+			kfree(v->value);
 		kfree( v );
 
 	}
